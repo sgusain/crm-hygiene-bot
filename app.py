@@ -55,7 +55,7 @@ def get_key(name, sidebar_value):
     if sidebar_value:
         return sidebar_value
     try:
-        return st.secrets.get(name, "")
+        return st.secrets[name]
     except Exception:
         return ""
 
@@ -216,25 +216,19 @@ alex kim,alex.kim@notion.com,555 888 9999,Notion,Designer,Software"""
 
 # ─── Sidebar ───
 with st.sidebar:
-    st.markdown("## ⚙️ Configuration")
+    st.markdown("## 🧹 CRM Hygiene Bot")
     st.markdown("---")
+    
+    # Silently check for secrets
     has_secrets = False
     try:
-        has_secrets = bool(st.secrets.get("CLAUDE_API_KEY"))
+        has_secrets = bool(st.secrets["CLAUDE_API_KEY"])
     except Exception:
         pass
-    if has_secrets:
-        demo_mode = False
-        sidebar_claude = ""
-        st.success("✅ API key configured")
-    else:
-        demo_mode = st.toggle("🎮 Demo Mode", value=True)
-        if not demo_mode:
-            st.caption("Only Claude API needed for AI analysis.")
-            sidebar_claude = st.text_input("Claude API Key", type="password")
-        else:
-            sidebar_claude = ""
-    st.markdown("---")
+    
+    demo_mode = not has_secrets
+    sidebar_claude = ""
+
     st.markdown("### 📊 How It Works")
     st.caption("1. Upload contacts CSV or use demo data")
     st.caption("2. Auto-scans: names, emails, phones, duplicates")
