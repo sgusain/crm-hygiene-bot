@@ -234,19 +234,20 @@ def generate_demo_csv():
     return """name,email,phone,company,title,industry
 john smith,john.smith@acme.com,1234567890,acme corp,Sales Manager,Technology
 SARAH JOHNSON,sarah.johnson@techstart.io,(555) 123-4567,TechStart,VP Marketing,
-john smith,john.smith@acme.com,123-456-7890,Acme Corp,Sales Manager,Technology
+jonathan smith,j.smith@acme.com,123-456-7891,Acme Corp,Sr. Sales Manager,Technology
 mike,,5551234567,,Developer,
 Jessica Lee,jessica.lee@@notion.com,555.987.6543,Notion,Product Manager,Software
 BOB WILSON,bob.wilson@salesforce.com,,Salesforce,Account Executive,Technology
-,amy.chen@hubspot.com,(555) 234-5678,HubSpot,SDR,Software
-rachel Green,rachel.green@stripe.com,5559876543,stripe,Head of Sales,Fintech
+,amy.chen@hubspot.com,(555) 234-5678,,SDR,
+rachel Green,rachel.green@stripe.com,5559876543,stripe,Head of Sales,
 DAVID PARK,david.park@figma.com,(555) 345-6789,Figma,Engineering Manager,Design
-tom harris,tom.harris@,5551112222,Deel,BDR,HR Tech
-Lisa Wang,lisa.wang@rippling.com,555-222-3333,Rippling,VP Operations,HR Tech
-james brown,james.brown@slack.com,(555)444-5555,slack,Customer Success,Technology
+tom harris,tom.harris@,5551112222,Deel,BDR,
+Lisa Wang,lisa.wang@rippling.com,555-222-3333,Rippling,VP of Ops,HR Tech
+james brown,james.brown@slack.com,(555)444-5555,slack,Customer Success Manager,Technology
 EMMA DAVIS,emma.davis@linear.com,5556667777,Linear,Product Lead,Software
 ,unknown@test.com,,,,
-alex kim,alex.kim@notion.com,555 888 9999,Notion,Designer,Software"""
+alex kim,alex.kim@notion.com,555 888 9999,Notion,Designer,Software
+Robert Wilson,r.wilson@salesforce.com,5553334444,Salesforce,AE,Technology"""
 
 
 # ─── Sidebar ───
