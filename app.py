@@ -156,31 +156,66 @@ def clean_dataframe(df):
     return cleaned, issues, duplicates, fixes
 
 
-def ai_analyze(df, issues, duplicates, api_key):
+def ai_enrich(df, issues, duplicates, api_key):
+    """AI does things regex can't: enrich missing fields, standardize titles, fuzzy dedup, classify industry."""
     url = "https://api.anthropic.com/v1/messages"
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
     
-    sample = df.head(10).to_csv(index=False)
+    full_csv = df.to_csv(index=False)
     issue_summary = {}
     for i in issues:
         t = i["issue"]
         issue_summary[t] = issue_summary.get(t, 0) + 1
     
-    prompt = f"""Analyze this CRM data quality report.
+    prompt = f"""You are a CRM data quality expert. Analyze AND enrich this contact data.
 
-DATA: {len(df)} contacts, columns: {list(df.columns)}
-Sample:
-{sample}
+FULL DATA (CSV):
+{full_csv}
 
-ISSUES: {json.dumps(issue_summary)}
-DUPLICATES: {len(duplicates)} found
+ISSUES ALREADY FIXED BY RULES: {json.dumps(issue_summary)}
+DUPLICATES FOUND: {json.dumps(duplicates)}
 
-Return ONLY JSON (no fences):
-{{"health_score": 0-100, "health_label": "Good/Needs Work/Critical", "summary": "2-3 sentences about data quality", "top_issues": ["issue1","issue2","issue3"], "enrichment_suggestions": ["suggestion1","suggestion2"]}}"""
+Do these 5 things:
 
-    payload = {"model": "claude-haiku-4-5-20251001", "max_tokens": 512, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+1. ENRICH MISSING DATA: For contacts missing company or industry, infer from email domain.
+   Example: email "amy.chen@hubspot.com" → company is "HubSpot", industry is "Software/CRM"
+
+2. STANDARDIZE TITLES: Normalize job titles to standard forms.
+   Example: "VP Marketing" and "Vice President of Marketing" → "VP of Marketing"
+   Example: "BDR" → "Business Development Representative"
+   Example: "SDR" → "Sales Development Representative"
+
+3. FUZZY DUPLICATES: Find contacts that are likely the same person even if not exact match.
+   Example: "Jon Smith" and "Jonathan Smith" at same company = likely duplicate
+
+4. INDUSTRY CLASSIFICATION: Fill in missing industry based on company name.
+   Example: company "Stripe" → industry "Fintech"
+   Example: company "Deel" → industry "HR Tech"
+
+5. HEALTH REPORT: Score the data 0-100 and give actionable recommendations.
+
+Return ONLY this JSON (no markdown fences):
+{{
+  "enriched_rows": [
+    {{"row": 4, "field": "company", "old": "", "new": "HubSpot", "reason": "Inferred from email domain"}},
+    {{"row": 4, "field": "industry", "old": "", "new": "Software/CRM", "reason": "Known company"}},
+    {{"row": 5, "field": "title", "old": "BDR", "new": "Business Development Representative", "reason": "Title standardization"}}
+  ],
+  "fuzzy_duplicates": [
+    {{"rows": [2, 5], "reason": "Similar names at same company", "confidence": "high"}}
+  ],
+  "health_score": 42,
+  "health_label": "Needs Work",
+  "summary": "2-3 specific sentences about THIS data quality",
+  "top_issues": ["specific issue 1", "specific issue 2", "specific issue 3"],
+  "enrichment_suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
+}}
+
+Be specific to THIS data. Reference actual names, companies, and row numbers."""
+
+    payload = {"model": "claude-haiku-4-5-20251001", "max_tokens": 2048, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp = requests.post(url, headers=headers, json=payload, timeout=45)
         resp.raise_for_status()
         content = resp.json()["content"][0]["text"].strip()
         if content.startswith("```"):
@@ -192,7 +227,7 @@ Return ONLY JSON (no fences):
             content = content[4:].strip()
         return json.loads(content)
     except Exception as e:
-        return {"health_score": 0, "health_label": "Error", "summary": f"AI analysis failed: {str(e)}", "top_issues": [], "enrichment_suggestions": []}
+        return {"enriched_rows": [], "fuzzy_duplicates": [], "health_score": 0, "health_label": "Error", "summary": f"AI analysis failed: {str(e)}", "top_issues": [], "enrichment_suggestions": []}
 
 
 def generate_demo_csv():
@@ -271,13 +306,39 @@ if df is not None:
         st.dataframe(df, use_container_width=True)
 
     with st.status("🧹 Cleaning CRM data...", expanded=True) as status:
-        st.write("🔍 Scanning for issues...")
+        st.write("🔍 Scanning for issues (rule-based)...")
         cleaned_df, issues, duplicates, fixes_applied = clean_dataframe(df)
 
-        st.write("🤖 AI analyzing data quality...")
+        st.write("🤖 AI enriching data (fuzzy dedup, missing fields, title cleanup)...")
         claude_key = get_key("CLAUDE_API_KEY", sidebar_claude)
+        ai_enrichments = 0
         if claude_key:
-            ai_report = ai_analyze(cleaned_df, issues, duplicates, claude_key)
+            ai_report = ai_enrich(cleaned_df, issues, duplicates, claude_key)
+            
+            # Apply AI enrichments to the dataframe
+            for enrichment in ai_report.get("enriched_rows", []):
+                row_idx = enrichment.get("row", 0) - 2  # Convert back to 0-index
+                field = enrichment.get("field", "")
+                new_val = enrichment.get("new", "")
+                if 0 <= row_idx < len(cleaned_df) and field in cleaned_df.columns and new_val:
+                    old_val = str(cleaned_df.at[row_idx, field]) if pd.notna(cleaned_df.at[row_idx, field]) else "(empty)"
+                    cleaned_df.at[row_idx, field] = new_val
+                    ai_enrichments += 1
+                    issues.append({
+                        "row": enrichment.get("row", "?"),
+                        "field": field,
+                        "issue": f"AI: {enrichment.get('reason', 'Enriched')}",
+                        "before": old_val,
+                        "after": new_val,
+                    })
+            
+            # Add fuzzy duplicates to the duplicates list
+            for fd in ai_report.get("fuzzy_duplicates", []):
+                duplicates.append({
+                    "type": f"AI: Fuzzy match ({fd.get('confidence', 'medium')})",
+                    "value": fd.get("reason", "Similar contacts"),
+                    "rows": fd.get("rows", []),
+                })
         else:
             time.sleep(0.5)
             total = len(df)
@@ -286,13 +347,14 @@ if df is not None:
             ai_report = {
                 "health_score": score,
                 "health_label": "Good" if score >= 80 else ("Needs Work" if score >= 50 else "Critical"),
-                "summary": f"Found {ic} issues across {total} contacts. {fixes_applied} auto-fixed. Add Claude API key for AI recommendations.",
+                "summary": f"Found {ic} issues across {total} contacts. {fixes_applied} auto-fixed. AI enrichment unavailable.",
                 "top_issues": [f"{fixes_applied} formatting issues auto-fixed", f"{len(duplicates)} duplicates detected", "Review flagged items manually"],
-                "enrichment_suggestions": ["Add Claude API key for smart analysis"],
+                "enrichment_suggestions": ["Connect Claude API for smart enrichment"],
             }
 
         elapsed = time.time() - start_time
-        status.update(label=f"✅ Cleaning complete in {elapsed:.1f}s", state="complete", expanded=False)
+        total_fixes = fixes_applied + ai_enrichments
+        status.update(label=f"✅ Cleaning complete in {elapsed:.1f}s — {total_fixes} fixes ({fixes_applied} rules + {ai_enrichments} AI)", state="complete", expanded=False)
 
     st.markdown("")
     score = ai_report.get("health_score", 0)
@@ -302,8 +364,8 @@ if df is not None:
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.markdown(f"<p class='stat-label'>Health Score</p><p class='{sc}'>{score}/100</p>", unsafe_allow_html=True)
     m2.metric("📊 Contacts", len(df))
-    m3.metric("🔧 Auto-Fixed", fixes_applied)
-    m4.metric("⚠️ Issues", len(issues))
+    m3.metric("🔧 Rule Fixes", fixes_applied)
+    m4.metric("🤖 AI Enriched", ai_enrichments if claude_key else 0)
     m5.metric("👥 Duplicates", len(duplicates))
 
     st.markdown("")
